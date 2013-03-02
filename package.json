@@ -5,7 +5,9 @@
   "scripts": {
     "start": "node app"
   },
-  "dependencies": {
-    "mocha": "*"
+  "devDependencies": {
+    "mocha": "*",
+    "chai": "*",
+    "sinon": "*"
   }
 }
