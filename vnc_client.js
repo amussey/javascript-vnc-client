@@ -171,7 +171,21 @@ SetPixelFormatClientMessage.prototype.send = function(stream){
   stream.write(buffer);
 }
 //TODO - Color Map Client Message
-//TODO - Set Encoding Client Message
+
+var SetEncodingClientMessage = function(encodings){
+  this.encodings_ = encodings;
+}
+SetEncodingClientMessage.prototype.send = function(stream){
+  var buffer = new Buffer(4 + (this.encodings_.length * 2));
+  buffer.writeUInt8(2, 0);
+  buffer.writeUInt8(0, 1);
+  buffer.writeUInt16BE(this.encodings_.length, 2);
+  for(var i=0;i<this.encodings_.length;i++){
+    buffer.writeInt16BE(this.encodings_[i], 4 + (i * 2));
+  }
+  stream.write(buffer);
+}
+
 var FramebufferUpdateRequestClientMessage = function(incremental, x, y, width, height){
   this.incremental_ = incremental;
   this.x_ = x;
@@ -219,11 +233,98 @@ PointerEventClientMessage.prototype.send = function(stream){
 
 //TODO - ClientCut Message
 
-var FramebufferUpdateServerMessage = function(){
+
+//Depth or bits per pixel?
+var RawEncoding = function(width, height, bitsPerPixel, isBigEndian){
+  this.width_ = width;
+  this.height_ = height;
+  this.pixels = [];
+  this.bitsPerPixel_ = bitsPerPixel;
+  //Not for sure if I like having to pass in true
+  this.isBigEndian_ = isBigEndian;
+
+  if(bitsPerPixel == 8){
+    this.readPixel = function(buffer, offset){
+      return buffer.readUInt8(offset);
+    }
+  }else if(bitsPerPixel == 16){
+    if(this.isBigEndian_){
+      this.readPixel = function(buffer, offset){
+        return buffer.readUInt16BE(offset);
+      }
+    }else{
+      this.readPixel = function(buffer, offset){
+        return buffer.readUInt16LE(offset);
+      }  
+    }
+  }else if(bitsPerPixel == 32){
+    if(this.isBigEndian_){
+      this.readPixel = function(buffer, offset){
+        return buffer.readUInt32BE(offset);
+      }
+    }else{
+      this.readPixel = function(buffer, offset){
+        return buffer.readUInt32LE(offset);
+      }
+    }
+  }else{
+     throw {
+      name: "InvalidExpectationException",
+      message: "Expected bits per pixel to be 8, 16, or 32 not '" + this.bitsPerPixel_ + "'"
+     } 
+  }
+}
+RawEncoding.prototype.read = function(buffer){
+  if(buffer.length < (this.width_ * this.height_ * this.bitsPerPixel_ / 8)){
+    return false;
+  }
+  var offset = 0;
+  for(var i = 0; i < this.width_; i++){
+    var row = [];
+    for(var j = 0; j< this.height_; j++){
+      row.push(this.readPixel(buffer, offset));
+      offset += this.bitsPerPixel_ / 8;
+    }
+    this.pixels.push(row);
+  }
+  return buffer.slice(offset);
+}
+
+//TODO Handle message type from server
+var FramebufferUpdateServerMessage = function(bitsPerPixel, isBigEndian){
+  this.bitsPerPixel_ = bitsPerPixel;
+  this.isBigEndian_ = isBigEndian;
+  //TODO - This is bad since we push data on but don't reset in the case 
   this.rectangles = [];
 }
 FramebufferUpdateServerMessage.prototype.read = function(buffer){
+  if(buffer.length < 3){
+    return false;
+  }
+  var number_of_rectangles = buffer.readUInt16BE(1);
+  buffer = buffer.slice(3);
+  for(var i = 0; i < number_of_rectangles; i++){
+    if(buffer.length < 12){
+      return false;
+    }
+    var rectangle = {
+      x: buffer.readUInt16BE(0),
+      y: buffer.readUInt16BE(2),
+      width: buffer.readUInt16BE(4),
+      height: buffer.readUInt16BE(6),
+      encoding: buffer.readInt32BE(8)
+    };
 
+    if(rectangle.encoding == 0){
+      var decoder = new RawEncoding(rectangle.width, rectangle.height, this.bitsPerPixel_, this.isBigEndian_);
+      buffer =  decoder.read(buffer.slice(12));
+      if(!buffer){
+        return false;
+      }
+      rectangle.data = decoder;
+    }
+    this.rectangles.push(rectangle);
+  }
 }
 
 var ProtocolVersionState = function(context){
@@ -261,5 +362,8 @@ module.exports = {
   SetPixelFormatClientMessage: SetPixelFormatClientMessage,
   FramebufferUpdateRequestClientMessage: FramebufferUpdateRequestClientMessage,
   KeyEventClientMessage: KeyEventClientMessage,
-  PointerEventClientMessage: PointerEventClientMessage
+  PointerEventClientMessage: PointerEventClientMessage,
+  RawEncoding: RawEncoding,
+  FramebufferUpdateServerMessage: FramebufferUpdateServerMessage,
+  SetEncodingClientMessage: SetEncodingClientMessage
 }

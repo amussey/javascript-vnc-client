@@ -30,7 +30,7 @@ describe('ProtocolVersionServerMessage', function(){
       message.read(new Buffer('RFB 003.003', 'ascii')).should.be.false;
     });
     it('throws error if it can\'t parse the version', function(){
-      (function () { message.read(new Buffer('RFB asd.asd\n', 'ascii'))}).should.throw;
+      (function () { message.read(new Buffer('RFB asd.asd\n', 'ascii'))}).should.throw();
     });
     it('should parse out major version #', function(){
       message.read(new Buffer('RFB 003.007\n', 'ascii'))
@@ -84,7 +84,7 @@ describe('AuthenticationServerMessage', function(){
       message.read(new Buffer([0x00, 0x00])).should.be.false;
     });
     it('should set authentication scheme to no authentication', function(){
-      message.read(new Buffer([0x00, 0x00, 0x00, 0x01]))
+      message.read(new Buffer([0x00, 0x00, 0x00, 0x01]));
       message.authentication_scheme.should.equal(1);
     });
     it('should return buffer minus 4 bytes if no authentication', function(){
@@ -391,13 +391,194 @@ describe('PointerEventClientMessage', function(){
   });
 });
 
-describe('FramebufferUpdateServerMessage', function(){
-  describe('read() with non-zero data', function(){
-    var message, result = null;
+describe('SetEncodingClientMessage', function(){
+  describe('send()', function(){
+    var message = null;
+    var mockStream = new MockStream();
     beforeEach(function(){
-      message = new vncClient.InitializationServerMessage();
-      result = message.read(new Buffer([0x00, 0x01, 0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x00, 0x07, 0x00, 0x08, 0x00, 0x09, 0x0A, 0x0B, 0x0C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x41]));
+      mockStream.write = sinon.spy();
+      message = new vncClient.SetEncodingClientMessage([1, -1]);
+      message.send(mockStream);
+    });
+    it('should write 2 for message type', function(){
+      mockStream.write.firstCall.args[0][0].should.equal(2);
+    });
+    it('should write padding', function(){
+      mockStream.write.firstCall.args[0][1].should.equal(0x00);
+    });
+    it('should write 2 for number of encodings', function(){
+      mockStream.write.firstCall.args[0][2].should.equal(0);
+      mockStream.write.firstCall.args[0][3].should.equal(2);
+    });
+    it('should write 1 for first encoding', function(){
+      mockStream.write.firstCall.args[0][4].should.equal(0);
+      mockStream.write.firstCall.args[0][5].should.equal(1);
+    });
+    it('should write -1 for second encoding', function(){
+      mockStream.write.firstCall.args[0][6].should.equal(0xff);
+      mockStream.write.firstCall.args[0][7].should.equal(0xff);
+    });
+  });
+});
+
+describe('RawEncoding', function(){
+  it('should return false if not enough data', function(){
+    var encoding = new vncClient.RawEncoding(1, 1, 8, true);
+    encoding.read(new Buffer([])).should.be.false;
+  });
+  it('should return buffer with 1 entry', function(){
+    var encoding = new vncClient.RawEncoding(1, 1, 8, true);
+    encoding.read(new Buffer([0x05, 0x02])).should.have.length(1);
+  });
+  describe('read 1x1x8 Big Endian pixel', function(){
+    var encoding = new vncClient.RawEncoding(1, 1, 8, true);
+    var buffer = encoding.read(new Buffer([0x05]));
+    it('should read 1 pixel', function(){
+      encoding.pixels.should.have.length(1);
+      encoding.pixels[0].should.have.length(1);
+    });
+    it('should have pixel of value 5', function(){
+      encoding.pixels[0][0].should.equal(5);
     });
     it('should return empty buffer', function(){
-      result.length.should.equal(0);
+      buffer.length.should.equal(0);
     });
+  });
+  describe('read 2x2x16 Big Endian pixel (with 1 extra padding at end)', function(){
+    var encoding = new vncClient.RawEncoding(2, 2, 16, true);
+    var buffer = encoding.read(new Buffer([0x00, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00]));
+    it('should read 2x2 pixels', function(){
+      encoding.pixels.should.have.length(2);
+      encoding.pixels[0].should.have.length(2);
+      encoding.pixels[1].should.have.length(2);
+    });
+    it('should have correct pixel values', function(){
+      encoding.pixels[0][0].should.equal(1);
+      encoding.pixels[0][1].should.equal(2);
+      encoding.pixels[1][0].should.equal(3);
+      encoding.pixels[1][1].should.equal(4);
+    });
+    it('should return buffer with 1 entry', function(){
+      buffer.length.should.equal(1);
+    });
+  });
+  describe('read 1x1x32 Little Endian pixel', function(){
+    var encoding = new vncClient.RawEncoding(1, 1, 32, false);
+    var buffer = encoding.read(new Buffer([0x01, 0x00, 0x00, 0x00]));
+    it('should read 1x1 pixels', function(){
+      encoding.pixels.should.have.length(1);
+      encoding.pixels[0].should.have.length(1);
+    });
+    it('should have correct pixel values', function(){
+      encoding.pixels[0][0].should.equal(1);
+    });
+  });
+  describe('read 2x2x16 Little Endian pixel', function(){
+    var encoding = new vncClient.RawEncoding(2, 2, 16, false);
+    encoding.read(new Buffer([0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00]));
+    it('should read 2x2 pixels', function(){
+      encoding.pixels.should.have.length(2);
+      encoding.pixels[0].should.have.length(2);
+      encoding.pixels[1].should.have.length(2);
+    });
+    it('should have correct pixel values', function(){
+      encoding.pixels[0][0].should.equal(1);
+      encoding.pixels[0][1].should.equal(2);
+      encoding.pixels[1][0].should.equal(3);
+      encoding.pixels[1][1].should.equal(4);
+    });
+  });
+  describe('read 1x1x32 Big Endian pixel', function(){
+    var encoding = new vncClient.RawEncoding(1, 1, 32, true);
+    encoding.read(new Buffer([0x00, 0x00, 0x00, 0x01]));
+    it('should read 1x1 pixels', function(){
+      encoding.pixels.should.have.length(1);
+      encoding.pixels[0].should.have.length(1);
+    });
+    it('should have correct pixel values', function(){
+      encoding.pixels[0][0].should.equal(1);
+    });
+  });
+  describe('bad bits per pixel', function(){
+    it('should throw error when passed 24 bits per pixel', function(){
+      (function(){ new vncClient.RawEncoding(1, 1, 24)}).should.throw();
+    });
+  });
+});
+
+describe('FramebufferUpdateServerMessage', function(){
+  it('should return false if there is not enough data to parse', function(){
+    (new vncClient.FramebufferUpdateServerMessage(8, true)).read(new Buffer([])).should.be.false;
+  });
+  it('should return false if there is a number of rectangles but not enough data', function(){
+    (new vncClient.FramebufferUpdateServerMessage(8, true)).read(new Buffer([0x00, 0x00, 0x01])).should.be.false;
+  });
+  it('should return false if there is not enough encoding data', function(){
+    (new vncClient.FramebufferUpdateServerMessage(8, true)).read(new Buffer([0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00])).should.be.false;
+  });
+  describe('read() 1 rectangle', function(){
+    var message, result = null;
+    beforeEach(function(){
+      message = new vncClient.FramebufferUpdateServerMessage(8, true);
+      result = message.read(new Buffer([0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01]));
+    });
+    it('should have 1 rectangle', function(){
+      message.rectangles.should.have.length(1);
+    });
+    it('should have 2 for x', function(){
+      message.rectangles[0].x.should.equal(2);
+    });
+    it('should have 3 for y', function(){
+      message.rectangles[0].y.should.equal(3);
+    });
+    it('should have 1 for width', function(){
+      message.rectangles[0].width.should.equal(1);
+    });
+    it('should have 1 for height', function(){
+      message.rectangles[0].height.should.equal(1);
+    });
+    it('should have 0 for encoding', function(){
+      message.rectangles[0].encoding.should.equal(0);
+    });
+    it('should have raw encoding data', function(){
+      message.rectangles[0].data.should.be.instanceOf(vncClient.RawEncoding);
+    });
+    //This test kind of duplicates
+    it('should have raw encoding data pixel', function(){
+      message.rectangles[0].data.pixels[0][0].should.equal(1);
+    });
+  });
+  describe('read() 2 rectangles', function(){
+    var message, result = null;
+    beforeEach(function(){
+      message = new vncClient.FramebufferUpdateServerMessage(16, true);
+      result = message.read(new Buffer([
+        0x00, 0x00, 0x02, 
+        0x00, 0x02, 0x00, 0x03, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 
+        0x00, 0x01, 
+        0x00, 0x04, 0x00, 0x05, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 
+        0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04]));
+    });
+    it('should have 2 rectangles', function(){
+      message.rectangles.should.have.length(2);
+    });
+    it('should have 4 for x', function(){
+      message.rectangles[1].x.should.equal(4);
+    });
+    it('should have 5 for y', function(){
+      message.rectangles[1].y.should.equal(5);
+    });
+    it('should have 2 for width', function(){
+      message.rectangles[1].width.should.equal(2);
+    });
+    it('should have 2 for height', function(){
+      message.rectangles[1].height.should.equal(2);
+    });
+    it('should have 0 for encoding', function(){
+      message.rectangles[1].encoding.should.equal(0);
+    });
+    it('should have raw encoding data', function(){
+      message.rectangles[1].data.should.be.instanceOf(vncClient.RawEncoding);
+    });
+  });
+});
