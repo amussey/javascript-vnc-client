@@ -1,6 +1,9 @@
 
 var url = require('url');
 var tls = require('tls');
+var VncClient = require('./vnc_client').VncClient;
+console.log(require('./vnc_client'));
+console.log(ProtocolVersionServerMessage);
 
 var vnc_url = url.parse(process.argv[2]);
 console.log(vnc_url);
@@ -12,13 +15,10 @@ var stream = tls.connect(vnc_url.port, vnc_url.hostname, function(){
   stream.write('CONNECT ' + vnc_url.path + ' HTTP/1.0\r\n\r\n');
 });
 
-
 stream.on('data', function(data){
-  console.log('SOCKET');
   var i = 0;
 
-  console.log("Buffer Length: " + data.length);
-  console.log(data.toString());
+  console.log(data);
   if (state == 0){
     var http_data = '';
     for(;i<data.length && http_data.indexOf('\r\n\r\n') == -1;i++){
@@ -32,11 +32,14 @@ stream.on('data', function(data){
 
     state = 1;
   }
+  data = data.slice(i);
 
+  if(state == 1 && data.length > 0){
+    var serverMsg = new ProtocolVersionServerMessage();
+    var clientMsg = new ProtocolVersionClientMessage(3, 3);
+    data = serverMsg.read(data);
+    console.log("Protocol: " + serverMsg);
 
-  if(state == 1 && (data.length - i) >= 12){
-    console.log("Protocol: " + data.toString('ascii', i, i+12));
-    i+=12;
     state = 2;
 
     stream.write(new Buffer("RFB 003.003\n"));
